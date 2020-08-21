@@ -4,7 +4,7 @@
 //
 // 2010-05-20 <jc@wippler.nl>
 
-#include "EtherCard_STM.h"
+#include "EtherCard.h"
 #include "net.h"
 
 #define gPB ether.buffer
@@ -90,13 +90,13 @@ bool EtherCard::dnsLookup (const char* name, bool fromRam) {
 
     while(!isLinkUp())
     {
-        if ((uint16_t) (millis() - start) >= 30000)
+        if (uint16_t(millis()) - start >= 30000)
             return false; //timeout waiting for link
     }
-    while(clientWaitingGw())
+    while(clientWaitingDns())
     {
         packetLoop(packetReceive());
-        if ((uint16_t) (millis() - start) >= 30000)
+        if (uint16_t(millis()) - start >= 30000)
             return false; //timeout waiting for gateway ARP
     }
 
@@ -105,9 +105,9 @@ bool EtherCard::dnsLookup (const char* name, bool fromRam) {
 
     start = millis();
     while (hisip[0] == 0) {
-        if ((uint16_t) (millis() - start) >= 30000)
+        if (uint16_t(millis()) - start >= 30000)
             return false; //timout waiting for dns response
-        uint16_t len = packetReceive();
+        word len = packetReceive();
         if (len > 0 && packetLoop(len) == 0) //packet not handled by tcp/ip packet loop
             if(checkForDnsAnswer(len))
                 return false; //DNS response recieved with error

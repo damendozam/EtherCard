@@ -9,41 +9,80 @@
 //
 // 2010-05-19 <jc@wippler.nl>
 //
-//-----------------------------------------------------------------
-//  Ported to STM32F103 by Vassilis Serasidis on 21 May 2015
-//  Home:  http://www.serasidis.gr
-//  email: avrsite@yahoo.gr
 //
-// PIN Connections (Using STM32F103):
+// PIN Connections (Using Arduino UNO):
 //   VCC -   3.3V
 //   GND -    GND
-//   SCK - Pin PA5
-//   SO  - Pin PA6
-//   SI  - Pin PA7
-//   CS  - Pin PA8
-//-----------------------------------------------------------------
+//   SCK - Pin 13
+//   SO  - Pin 12
+//   SI  - Pin 11
+//   CS  - Pin  8
+//
+/** @file */ 
 
-
-
-#ifndef EtherCard_STM_h
-#define EtherCard_STM_h
+#ifndef EtherCard_h
+#define EtherCard_h
 #ifndef __PROG_TYPES_COMPAT__
   #define __PROG_TYPES_COMPAT__
 #endif
 
-#if ARDUINO >= 100
 #include <Arduino.h> // Arduino 1.0
 #define WRITE_RESULT size_t
 #define WRITE_RETURN return 1;
-#else
-#include <WProgram.h> // Arduino 0022
-#define WRITE_RESULT void
-#define WRITE_RETURN
+
+#ifndef DEBUG
+	#define DEBUG_PRINT(x)
 #endif
 
-//#include <avr/pgmspace.h>
+#include <pgmspace.h>
+#include <Print.h>
+
+
 #include "enc28j60.h"
 #include "net.h"
+
+/** Enable DHCP.
+*   Setting this to zero disables the use of DHCP; if a program uses DHCP it will
+*   still compile but the program will not work. Saves about 60 bytes SRAM and
+*   1550 bytes flash.
+*/
+#define ETHERCARD_DHCP 1
+
+/** Enable client connections.
+* Setting this to zero means that the program cannot issue TCP client requests
+* anymore. Compilation will still work but the request will never be
+* issued. Saves 4 bytes SRAM and 550 byte flash.
+*/
+#define ETHERCARD_TCPCLIENT 1
+
+/** Enable TCP server functionality. 
+*   Setting this to zero means that the program will not accept TCP client
+*   requests. Saves 2 bytes SRAM and 250 bytes flash.
+*/
+#define ETHERCARD_TCPSERVER 1
+
+/** Enable UDP server functionality. 
+*   If zero UDP server is disabled. It is
+*   still possible to register callbacks but these will never be called. Saves
+*   about 40 bytes SRAM and 200 bytes flash. If building with -flto this does not
+*   seem to save anything; maybe the linker is then smart enough to optimize the
+*   call away.
+*/
+#define ETHERCARD_UDPSERVER 1
+
+/** Enable automatic reply to pings.
+*   Setting to zero means that the program will not automatically answer to
+*   PINGs anymore. Also the callback that can be registered to answer incoming
+*   pings will not be called. Saves 2 bytes SRAM and 230 bytes flash.
+*/
+#define ETHERCARD_ICMP 1
+
+/** Enable use of stash.
+*   Setting this to zero means that the stash mechanism cannot be used. Again
+*   compilation will still work but the program may behave very unexpectedly.
+*   Saves 30 bytes SRAM and 80 bytes flash.
+*/
+#define ETHERCARD_STASH 1
 
 /** This type definition defines the structure of a UDP server event handler callback funtion */
 typedef void (*UdpServerCallback)(
@@ -68,7 +107,7 @@ typedef struct {
 } StashHeader;
 
 /** This class provides access to the memory within the ENC28J60 network interface. */
-class Stash : public /*Stream*/ Print, private StashHeader {
+class Stash : public Print, private StashHeader {
     uint8_t curr;      //!< Current page
     uint8_t offs;      //!< Current offset in page
 
@@ -77,10 +116,10 @@ class Stash : public /*Stream*/ Print, private StashHeader {
             uint8_t bytes[64];
             uint16_t words[32];
             struct {
-                StashHeader head;
+                StashHeader head; // StashHeader is only stored in first block 
                 uint8_t filler[59];
-                uint8_t tail;
-                uint8_t next;
+                uint8_t tail;     // only meaningful if bnum==last; number of bytes in last block 
+                uint8_t next;     // pointer to next block 
             };
         };
         uint8_t bnum;
@@ -91,10 +130,10 @@ class Stash : public /*Stream*/ Print, private StashHeader {
     static uint8_t fetchByte (uint8_t blk, uint8_t off);
 
     static Block bufs[2];
-    static uint8_t map[256/8];
+    static uint8_t map[SCRATCH_MAP_SIZE];
 
 public:
-    static void initMap (uint8_t last);
+    static void initMap (uint8_t last=SCRATCH_PAGE_NUM);
     static void load (uint8_t idx, uint8_t blk);
     static uint8_t freeCount ();
 
@@ -181,6 +220,7 @@ public:
 *   ~~~~~~~~~~~~~
 *
 */
+
 class BufferFiller : public Print {
     uint8_t *start; //!< Pointer to start of buffer
     uint8_t *ptr; //!< Pointer to cursor position
@@ -253,9 +293,22 @@ public:
     *     @param  csPin Arduino pin number connected to chip select. Default = 8
     *     @return <i>uint8_t</i> Firmware version or zero on failure.
     */
-    static uint8_t begin (const uint16_t size, const uint8_t* macaddr,
-                          uint8_t csPin =16);
-
+#if defined(__AVR__)
+   static uint8_t begin (const uint16_t size, const uint8_t* macaddr,
+                          uint8_t csPin =8);
+#endif
+#if defined(ESP8266)
+	static uint8_t begin (const uint16_t size, const uint8_t* macaddr,
+                          uint8_t csPin =15);
+#endif
+#if defined(ESP32)
+	static uint8_t begin (const uint16_t size, const uint8_t* macaddr,
+                          uint8_t csPin =5);
+#endif
+#if defined(__STM32F1__)
+	static uint8_t begin (const uint16_t size, const uint8_t* macaddr,
+                          uint8_t csPin =PA8);
+#endif
     /**   @brief  Configure network interface with static IP
     *     @param  my_ip IP address (4 bytes). 0 for no change.
     *     @param  gw_ip Gateway address (4 bytes). 0 for no change. Default = 0
@@ -289,7 +342,7 @@ public:
     *     @param  plen Number of bytes in packet
     *     @return <i>uint16_t</i> Offset within packet of TCP payload. Zero for no data.
     */
-    static uint16_t accept (uint16_t port, uint16_t plen);
+    static uint16_t acceptp (uint16_t port, uint16_t plen);
 
     /**   @brief  Send a response to a HTTP request
     *     @param  dlen Size of the HTTP (TCP) payload
@@ -540,14 +593,6 @@ public:
     */
     static void printIp (const char* msg, const uint8_t *buf);
 
-    /**   @brief  Output Flash String Helper and IP address to serial port in dotted decimal IP format
-    *     @param  ifsh Pointer to Flash String Helper
-    *     @param  buf Pointer to 4 byte IP address
-    *     @note   There is no check of source or destination size. Ensure both are 4 bytes
-    *     @todo   What is a FlashStringHelper?
-    */
-    static void printIp (const __FlashStringHelper *ifsh, const uint8_t *buf);
-
     /**   @brief  Search for a string of the form key=value in a string that looks like q?xyz=abc&uvw=defgh HTTP/1.1\\r\\n
     *     @param  str Pointer to the null terminated string to search
     *     @param  strbuf Pointer to buffer to hold null terminated result string
@@ -588,6 +633,14 @@ public:
     */
     static void makeNetStr(char *resultstr,uint8_t *bytestr,uint8_t len,
                            char separator,uint8_t base);
+
+    /**   @brief  Return the sequence number of the current TCP package
+    */
+    static uint32_t getSequenceNumber();
+
+    /**   @brief  Return the payload length of the current Tcp package
+    */
+    static uint16_t getTcpPayloadLength(); 
 };
 
 extern EtherCard ether; //!< Global presentation of EtherCard class
